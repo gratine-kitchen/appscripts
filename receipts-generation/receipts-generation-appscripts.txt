@@ -134,12 +134,16 @@ function getLineItems(mbRows, mbHeaders, miRows, miHeaders, bookingId) {
   const bookingCol = mbHeaders.indexOf('Booking');
   const dishCol = mbHeaders.indexOf('Dish');
   const qtyCol = mbHeaders.indexOf('Qty');
+  const orderCol = mbHeaders.indexOf('Order');
   const upgradeWaivedCol = mbHeaders.indexOf('UpgradeWaived');
   const complimentaryCol = mbHeaders.indexOf('Complimentary');
 
   return mbRows
     .filter(row => String(row[bookingCol]).trim() === String(bookingId).trim())
     .filter(row => !truthy(row[upgradeWaivedCol]))
+    .sort((a, b) => {
+    return Number(a[orderCol]) - Number(b[orderCol]);
+  })
     .map(row => {
       const dishId = row[dishCol];
       const mi = findRow(miRows, miHeaders, 'Dish', dishId);
