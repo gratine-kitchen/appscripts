@@ -1,0 +1,302 @@
+/**
+ * Receipt Generator for Gratine Receipts 2024-26
+ * Source: 1Gjj6AdnMuZRw0_48qI0EbZWPk3JbBYlRk1vrz6HBcVU
+ * Receipt: 1JhTvCsAlABfwmPcE4P3rrZZt29aRYQIGGclvVrTK2bY
+ */
+
+const SOURCE_SS_ID = '1Gjj6AdnMuZRw0_48qI0EbZWPk3JbBYlRk1vrz6HBcVU';
+const RECEIPT_SS_ID = '1JhTvCsAlABfwmPcE4P3rrZZt29aRYQIGGclvVrTK2bY';
+const TEMPLATE_SHEET_NAME = 'ReceiptTemplate';
+const SOURCE_SHEETS = {
+  bookings: 'Bookings',
+  menuForBooking: 'MenuForBooking',
+  menuItems: 'MenuItems',
+  guests: 'Guests'
+};
+
+const TEMPLATE = {
+  firstItemRow: 13,
+  lastItemRow: 17,
+  subtotalRow: 18,
+  serviceChargeRow: 19,
+  depositRow: 20,
+  totalRow: 22
+};
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('Receipts')
+    .addItem('Generate receipt by booking ID', 'promptGenerateReceipt')
+    .addToUi();
+}
+
+function promptGenerateReceipt() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('Generate Receipt', 
+    'Enter booking ItemId:', 
+    ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  
+  const bookingId = String(response.getResponseText()).trim();
+  if (!bookingId) {
+    ui.alert('No booking ID entered.');
+    return;
+  }
+  
+  try {
+    const sheetName = generateReceipt(bookingId);
+    ui.alert('Success', `Receipt created: ${sheetName}`, ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Error', e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+function generateReceipt(bookingId) {
+  const receiptSS = SpreadsheetApp.openById(RECEIPT_SS_ID);
+  const sourceSS = SpreadsheetApp.openById(SOURCE_SS_ID);
+
+  // Get data tables
+  const bookings = getTable(sourceSS, SOURCE_SHEETS.bookings);
+  const menuForBooking = getTable(sourceSS, SOURCE_SHEETS.menuForBooking);
+  const menuItems = getTable(sourceSS, SOURCE_SHEETS.menuItems);
+  const guests = getTable(sourceSS, SOURCE_SHEETS.guests);
+
+  // Find booking
+  const booking = findRow(bookings.rows, bookings.headers, 'ItemId', bookingId);
+  if (!booking) throw new Error(`Booking not found: ${bookingId}`);
+
+  // Find guest
+  const guestId = booking[bookings.headers.indexOf('PrimaryGuest')];
+  const guest = findRow(guests.rows, guests.headers, 'ItemId', guestId);
+  const guestName = guest ? String(guest[guests.headers.indexOf('GuestName')]) : 'Unknown Guest';
+  
+  const bookingDate = booking[bookings.headers.indexOf('Date')];
+  const serviceChargePct = parseFloat(booking[bookings.headers.indexOf('ServiceCharge')] || 0);
+  const discountPct = parseFloat(booking[bookings.headers.indexOf('Discount')] || 0);
+  const depositPaid = parseFloat(booking[bookings.headers.indexOf('DepositPaid')] || 0);
+
+  // Create sheet
+  const sheetName = `${formatDateForName(bookingDate)} (${guestName})`;
+  deleteExistingSheet(receiptSS, sheetName);
+
+  const templateSheet = receiptSS.getSheetByName(TEMPLATE_SHEET_NAME);
+  if (!templateSheet) throw new Error('ReceiptTemplate sheet not found');
+  
+  const newSheet = templateSheet.copyTo(receiptSS).setName(sheetName);
+  receiptSS.setActiveSheet(newSheet);
+  receiptSS.moveActiveSheet(1);
+
+  // Fill static fields
+  newSheet.getRange('B8').setValue(formatDateForDisplay(bookingDate));
+  newSheet.getRange('B9').setValue(guestName);
+
+  // Get line items
+  const lineItems = getLineItems(menuForBooking.rows, menuForBooking.headers, 
+                                menuItems.rows, menuItems.headers, 
+                                bookingId);
+
+  // Insert rows if needed
+  const neededRows = lineItems.length;
+  const templateRows = TEMPLATE.lastItemRow - TEMPLATE.firstItemRow + 1;
+  if (neededRows > templateRows) {
+    const extraRows = neededRows - templateRows;
+    newSheet.insertRowsBefore(TEMPLATE.totalRow, extraRows);
+    copyTemplateRowStyle(newSheet, TEMPLATE.lastItemRow, extraRows);
+  }
+
+  // Fill line items
+  fillLineItems(newSheet, lineItems, TEMPLATE.firstItemRow);
+
+  // Recalculate totals (preserve template formulas where possible)
+  updateTotals(newSheet, TEMPLATE.firstItemRow, lineItems.length, 
+               serviceChargePct, discountPct, depositPaid);
+
+  return sheetName;
+}
+
+function getTable(ss, sheetName) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`Sheet not found: ${sheetName}`);
+  
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String).map(h => h.trim());
+  const rows = values.slice(1);
+  return { headers, rows };
+}
+
+function findRow(rows, headers, keyCol, keyValue) {
+  const col = headers.indexOf(keyCol);
+  return rows.find(row => String(row[col]).trim() === String(keyValue).trim());
+}
+
+function getLineItems(mbRows, mbHeaders, miRows, miHeaders, bookingId) {
+  const bookingCol = mbHeaders.indexOf('Booking');
+  const dishCol = mbHeaders.indexOf('Dish');
+  const qtyCol = mbHeaders.indexOf('Qty');
+  const upgradeWaivedCol = mbHeaders.indexOf('UpgradeWaived');
+  const complimentaryCol = mbHeaders.indexOf('Complimentary');
+
+  return mbRows
+    .filter(row => String(row[bookingCol]).trim() === String(bookingId).trim())
+    .filter(row => !truthy(row[upgradeWaivedCol]))
+    .map(row => {
+      const dishId = row[dishCol];
+      const mi = findRow(miRows, miHeaders, 'Dish', dishId);
+      if (!mi) return null;
+
+      const upgradePrice = parseFloat(mi[miHeaders.indexOf('UpgradePrice')] || 0);
+      if (upgradePrice <= 0 && !truthy(row[complimentaryCol])) return null;
+
+      return {
+        dish: dishId,
+        qty: parseFloat(row[qtyCol] || 0),
+        upgradePrice: upgradePrice,
+        complimentary: truthy(row[complimentaryCol])
+      };
+    })
+    .filter(item => item !== null);
+}
+
+function fillLineItems(sheet, items, startRow) {
+  items.forEach((item, i) => {
+    const row = startRow + i;
+    sheet.getRange(row, 1).setValue(item.dish);
+    sheet.getRange(row, 2).setValue(item.qty);
+    sheet.getRange(row, 3).setValue(item.upgradePrice);
+    
+    if (item.complimentary) {
+      sheet.getRange(row, 4).setValue('complimentary').setHorizontalAlignment('right');
+    } else {
+      // Copy formula from first row if available
+      const firstFormula = sheet.getRange(startRow, 4).getFormulaR1C1();
+      if (firstFormula) {
+        sheet.getRange(row, 4).setFormulaR1C1(firstFormula);
+      }
+    }
+  });
+}
+
+function copyTemplateRowStyle(sheet, sourceRow, numRows) {
+  const sourceRange = sheet.getRange(sourceRow, 1, 1, sheet.getLastColumn());
+  for (let i = 0; i < numRows; i++) {
+    const targetRow = sourceRow + i + 1;
+    sourceRange.copyTo(sheet.getRange(targetRow, 1, 1, sheet.getLastColumn()), 
+                      SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+  }
+}
+
+function updateTotals(sheet, firstRow, numRows, servicePct, discountPct, depositPaid) {
+  const subtotalRow = TEMPLATE.subtotalRow + Math.max(0, numRows - 5);
+  const serviceRow = TEMPLATE.serviceChargeRow + Math.max(0, numRows - 5);
+  const totalRow = TEMPLATE.totalRow + Math.max(0, numRows - 5);
+
+  const subtotalRange = `D${firstRow}:D${firstRow + numRows - 1}`;
+  sheet.getRange(subtotalRow, 4).setFormula(`=SUMPRODUCT(B${firstRow}:B${firstRow + numRows - 1},C${firstRow}:C${firstRow + numRows - 1})`);
+  
+  sheet.getRange(serviceRow, 4).setFormula(`=D${subtotalRow}*${servicePct}`);
+  
+  let totalFormula = `=D${subtotalRow}+D${serviceRow}-D${subtotalRow}*${discountPct}`;
+  
+  if (depositPaid > 0) {
+    const depositRow = totalRow - 1;
+    sheet.insertRowBefore(totalRow);
+    sheet.getRange(depositRow, 4).setValue(-depositPaid)
+      .setNumberFormat('#,##0.00;(#,##0.00)')
+      .setHorizontalAlignment('right');
+    totalFormula = `=D${subtotalRow}+D${serviceRow}-D${subtotalRow}*${discountPct}+D${depositRow}`;
+  }
+  
+  sheet.getRange(totalRow, 4).setFormula(totalFormula);
+}
+
+function deleteExistingSheet(ss, name) {
+  const sheet = ss.getSheetByName(name);
+  if (sheet) ss.deleteSheet(sheet);
+}
+
+function truthy(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  const str = String(value).toLowerCase().trim();
+  return str === 'true' || str === '1' || str === 'yes';
+}
+
+function formatDateForDisplay(date) {
+  const d = new Date(date);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+}
+
+function formatDateForName(date) {
+  const d = new Date(date);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM-dd-yyyy');
+}
+
+ function copySheetsToNewWorkbook() {
+  // Source spreadsheet and sheet containing the list of sheet names.
+  var sourceSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetWithNames = sourceSpreadsheet.getSheetByName("Sheet4");
+
+  // Get the list of sheet names from the specified sheet.
+  var sheetNamesRange = sheetWithNames.getDataRange();
+  var sheetNamesValues = sheetNamesRange.getValues();
+
+  // Create a new spreadsheet.
+  var newSpreadsheet = SpreadsheetApp.create("Gratine Receipts for 2024-25 tax filing (final)");
+
+  // Loop through the sheet names and copy the corresponding sheets to the new spreadsheet.
+  for (var i = 0; i < sheetNamesValues.length; i++) {
+    var sheetName = sheetNamesValues[i][0]; // Assuming sheet names are in the first column
+
+    // Get the sheet from the source spreadsheet.
+    var sheetToCopy = sourceSpreadsheet.getSheetByName(sheetName);
+
+    // Check if the sheet exists in the source spreadsheet.
+    if (sheetToCopy) {
+      // Copy the sheet to the new spreadsheet.
+      sheetToCopy.copyTo(newSpreadsheet);
+    } else {
+      Logger.log("Sheet '" + sheetName + "' not found in the source spreadsheet.");
+    }
+  }
+
+  // Remove the default "Sheet1" from the new spreadsheet.
+  newSpreadsheet.deleteSheet(newSpreadsheet.getSheetByName("Sheet1"));
+
+  Logger.log("Sheets copied to new spreadsheet: " + newSpreadsheet.getUrl());
+}
+
+
+
+function ALLSHEETNAMES() {
+  let ss = SpreadsheetApp.getActive();
+  let sheets = ss.getSheets();
+  let sheetNames = [];
+  sheets.forEach(function(sheet) {
+    sheetNames.push(sheet.getName());
+  });
+  return sheetNames;
+}
+
+
+function sortGoogleSheets() {
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Store all the worksheets in this array
+  var sheetNameArray = [];
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    sheetNameArray.push(sheets[i].getName());
+  }
+
+  sheetNameArray.sort();
+
+  // Reorder the sheets.
+  for( var j = 0; j < sheets.length; j++ ) {
+    ss.setActiveSheet(ss.getSheetByName(sheetNameArray[j]));
+    Logger.log(sheetNameArray[j]);
+    //ss.moveActiveSheet(j + 1);
+    ss.moveActiveSheet(sheets.length - j);
+  }
+}
