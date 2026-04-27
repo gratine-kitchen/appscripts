@@ -101,7 +101,7 @@ function generateReceipt(bookingId) {
   const templateRows = TEMPLATE.lastItemRow - TEMPLATE.firstItemRow + 1;
   if (neededRows > templateRows) {
     const extraRows = neededRows - templateRows;
-    newSheet.insertRowsBefore(TEMPLATE.totalRow, extraRows);
+    newSheet.insertRowsBefore(TEMPLATE.subtotalRow, extraRows);
     copyTemplateRowStyle(newSheet, TEMPLATE.lastItemRow, extraRows);
   }
 
@@ -118,7 +118,7 @@ function generateReceipt(bookingId) {
 function getTable(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Sheet not found: ${sheetName}`);
-  
+   
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(String).map(h => h.trim());
   const rows = values.slice(1);
