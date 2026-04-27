@@ -19,7 +19,8 @@ const TEMPLATE = {
   lastItemRow: 17,
   subtotalRow: 18,
   serviceChargeRow: 19,
-  depositRow: 20,
+  corkageRow: 20,
+  discountRow: 21,
   totalRow: 22
 };
 
@@ -53,6 +54,7 @@ function promptGenerateReceipt() {
 }
 
 function generateReceipt(bookingId) {
+  
   const receiptSS = SpreadsheetApp.openById(RECEIPT_SS_ID);
   const sourceSS = SpreadsheetApp.openById(SOURCE_SS_ID);
 
@@ -99,17 +101,20 @@ function generateReceipt(bookingId) {
   // Insert rows if needed
   const neededRows = lineItems.length;
   const templateRows = TEMPLATE.lastItemRow - TEMPLATE.firstItemRow + 1;
-  if (neededRows > templateRows) {
-    const extraRows = neededRows - templateRows;
-    newSheet.insertRowsBefore(TEMPLATE.subtotalRow, extraRows);
-    copyTemplateRowStyle(newSheet, TEMPLATE.lastItemRow, extraRows);
+  const numRowsDelta = neededRows - templateRows;
+  if (numRowsDelta > 0) {
+   newSheet.insertRowsBefore(TEMPLATE.subtotalRow, numRowsDelta);
+    copyTemplateRowStyle(newSheet, TEMPLATE.lastItemRow, numRowsDelta);
+  } else if (numRowsDelta < 0) {
+    const unneededRows = Math.abs(numRowsDelta);
+    newSheet.deleteRows(TEMPLATE.subtotalRow - unneededRows, unneededRows);
   }
 
   // Fill line items
   fillLineItems(newSheet, lineItems, TEMPLATE.firstItemRow);
 
   // Recalculate totals (preserve template formulas where possible)
-  updateTotals(newSheet, TEMPLATE.firstItemRow, lineItems.length, 
+  updateTotals(newSheet, TEMPLATE.firstItemRow, lineItems.length, numRowsDelta,
                serviceChargePct, discountPct, depositPaid);
 
   return sheetName;
@@ -118,7 +123,7 @@ function generateReceipt(bookingId) {
 function getTable(ss, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Sheet not found: ${sheetName}`);
-   
+
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(String).map(h => h.trim());
   const rows = values.slice(1);
@@ -190,17 +195,35 @@ function copyTemplateRowStyle(sheet, sourceRow, numRows) {
   }
 }
 
-function updateTotals(sheet, firstRow, numRows, servicePct, discountPct, depositPaid) {
-  const subtotalRow = TEMPLATE.subtotalRow + Math.max(0, numRows - 5);
-  const serviceRow = TEMPLATE.serviceChargeRow + Math.max(0, numRows - 5);
-  const totalRow = TEMPLATE.totalRow + Math.max(0, numRows - 5);
+function updateTotals(sheet, firstRow, numRows, numRowsDelta, servicePct, discountPct, depositPaid) {
+  const subtotalRow = TEMPLATE.subtotalRow + numRowsDelta;
+  const serviceRow = TEMPLATE.serviceChargeRow + numRowsDelta;
+  const discountRow = TEMPLATE.discountRow + numRowsDelta;
+  const totalRow = TEMPLATE.totalRow + numRowsDelta;
 
   const subtotalRange = `D${firstRow}:D${firstRow + numRows - 1}`;
-  sheet.getRange(subtotalRow, 4).setFormula(`=SUMPRODUCT(B${firstRow}:B${firstRow + numRows - 1},C${firstRow}:C${firstRow + numRows - 1})`);
   
-  sheet.getRange(serviceRow, 4).setFormula(`=D${subtotalRow}*${servicePct}`);
+  sheet.getRange(subtotalRow, 4).setFormula(`=SUM(D${firstRow}:D${firstRow + numRows - 1})`);
   
-  let totalFormula = `=D${subtotalRow}+D${serviceRow}-D${subtotalRow}*${discountPct}`;
+  if (servicePct > 0)
+  {
+    sheet.getRange(serviceRow, 4).setFormula(`=D${subtotalRow}*${servicePct}`);
+  }
+  else
+  {
+    sheet.getRange(serviceRow, 4).setValue("complimentary");
+  }
+  
+  if (discountPct > 0)
+  {
+    sheet.getRange(discountRow, 4).setFormula(`=D${subtotalRow}*-${discountPct}`);
+  }
+  else
+  {
+    sheet.hideRows(discountRow);
+  }
+
+  let totalFormula = `=SUM(D${subtotalRow}:D${totalRow - 1})`;
   
   if (depositPaid > 0) {
     const depositRow = totalRow - 1;
@@ -233,7 +256,7 @@ function formatDateForDisplay(date) {
 
 function formatDateForName(date) {
   const d = new Date(date);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM-dd-yyyy');
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyyMMdd');
 }
 
  function copySheetsToNewWorkbook() {
