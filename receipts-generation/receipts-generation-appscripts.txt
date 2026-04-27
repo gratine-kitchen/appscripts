@@ -54,7 +54,7 @@ function promptGenerateReceipt() {
 }
 
 function generateReceipt(bookingId) {
-  
+
   const receiptSS = SpreadsheetApp.openById(RECEIPT_SS_ID);
   const sourceSS = SpreadsheetApp.openById(SOURCE_SS_ID);
 
@@ -216,6 +216,7 @@ function updateTotals(sheet, firstRow, numRows, numRowsDelta, servicePct, discou
   
   if (discountPct > 0)
   {
+    sheet.getRange(discountRow, 3).setValue('Discount (-' + (discountPct * 100) + '%)');
     sheet.getRange(discountRow, 4).setFormula(`=D${subtotalRow}*-${discountPct}`);
   }
   else
@@ -291,6 +292,29 @@ function formatDateForName(date) {
   newSpreadsheet.deleteSheet(newSpreadsheet.getSheetByName("Sheet1"));
 
   Logger.log("Sheets copied to new spreadsheet: " + newSpreadsheet.getUrl());
+}
+
+function doPost(e) {
+  try {
+    const body = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
+    const bookingId = body.bookingId;
+
+    if (!bookingId) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ error: 'Missing bookingId' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const result = generateReceipt(bookingId);
+    
+    return ContentService
+      .createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 
