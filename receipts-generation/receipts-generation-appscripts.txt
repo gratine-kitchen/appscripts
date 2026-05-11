@@ -53,6 +53,19 @@ function promptGenerateReceipt() {
   }
 }
 
+function generateReceiptExternal(bookingId) {
+
+  try {
+    const receiptSheetUrl = generateReceipt(bookingId);
+    return {
+      success: true,
+      sheetUrl: receiptSheetUrl
+  };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
 function generateReceipt(bookingId) {
 
   const receiptSS = SpreadsheetApp.openById(RECEIPT_SS_ID);
@@ -117,7 +130,8 @@ function generateReceipt(bookingId) {
   updateTotals(newSheet, TEMPLATE.firstItemRow, lineItems.length, numRowsDelta,
                serviceChargePct, discountPct, depositPaid);
 
-  return sheetName;
+  const newSheetUrl = receiptSS.getUrl() + '#gid=' + newSheet.getSheetId();
+  return newSheetUrl;
 }
 
 function getTable(ss, sheetName) {
@@ -314,40 +328,5 @@ function doPost(e) {
     return ContentService
       .createTextOutput(JSON.stringify({ error: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-
-
-function ALLSHEETNAMES() {
-  let ss = SpreadsheetApp.getActive();
-  let sheets = ss.getSheets();
-  let sheetNames = [];
-  sheets.forEach(function(sheet) {
-    sheetNames.push(sheet.getName());
-  });
-  return sheetNames;
-}
-
-
-function sortGoogleSheets() {
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // Store all the worksheets in this array
-  var sheetNameArray = [];
-  var sheets = ss.getSheets();
-  for (var i = 0; i < sheets.length; i++) {
-    sheetNameArray.push(sheets[i].getName());
-  }
-
-  sheetNameArray.sort();
-
-  // Reorder the sheets.
-  for( var j = 0; j < sheets.length; j++ ) {
-    ss.setActiveSheet(ss.getSheetByName(sheetNameArray[j]));
-    Logger.log(sheetNameArray[j]);
-    //ss.moveActiveSheet(j + 1);
-    ss.moveActiveSheet(sheets.length - j);
   }
 }
