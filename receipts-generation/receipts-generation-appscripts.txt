@@ -168,11 +168,14 @@ function getLineItems(mbRows, mbHeaders, miRows, miHeaders, bookingId) {
       const mi = findRow(miRows, miHeaders, 'Dish', dishId);
       if (!mi) return null;
 
+      const receiptDisplayName = mi[miHeaders.indexOf('ReceiptDisplayName')];
+
       const upgradePrice = parseFloat(mi[miHeaders.indexOf('UpgradePrice')] || 0);
       if (upgradePrice <= 0 && !truthy(row[complimentaryCol])) return null;
 
       return {
         dish: dishId,
+        receiptDisplayName : receiptDisplayName,
         qty: parseFloat(row[qtyCol] || 0),
         upgradePrice: upgradePrice,
         complimentary: truthy(row[complimentaryCol])
@@ -184,7 +187,11 @@ function getLineItems(mbRows, mbHeaders, miRows, miHeaders, bookingId) {
 function fillLineItems(sheet, items, startRow) {
   items.forEach((item, i) => {
     const row = startRow + i;
-    sheet.getRange(row, 1).setValue(item.dish);
+
+    const displayName = String(item.receiptDisplayName || '').trim();
+    const description = displayName !== '' ? displayName : item.dish;
+    sheet.getRange(row, 1).setValue(description);
+
     sheet.getRange(row, 2).setValue(item.qty);
     sheet.getRange(row, 3).setValue(item.upgradePrice);
     
