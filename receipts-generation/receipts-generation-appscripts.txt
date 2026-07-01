@@ -173,11 +173,14 @@ function getLineItems(mbRows, mbHeaders, miRows, miHeaders, bookingId) {
       const upgradePrice = parseFloat(mi[miHeaders.indexOf('UpgradePrice')] || 0);
       if (upgradePrice <= 0 && !truthy(row[complimentaryCol])) return null;
 
+      const upgradePriceOverride = parseFloat(mi[miHeaders.indexOf('UpgradePriceOverride')] || 0);
+
       return {
         dish: dishId,
         receiptDisplayName : receiptDisplayName,
         qty: parseFloat(row[qtyCol] || 0),
         upgradePrice: upgradePrice,
+        upgradePriceOverride: upgradePriceOverride,
         complimentary: truthy(row[complimentaryCol])
       };
     })
@@ -193,7 +196,7 @@ function fillLineItems(sheet, items, startRow) {
     sheet.getRange(row, 1).setValue(description);
 
     sheet.getRange(row, 2).setValue(item.qty);
-    sheet.getRange(row, 3).setValue(item.upgradePrice);
+    sheet.getRange(row, 3).setValue( (item.upgradePriceOverride > 0) ? item.upgradePriceOverride : item.upgradePrice);
     
     if (item.complimentary) {
       sheet.getRange(row, 4).setValue('complimentary').setHorizontalAlignment('right');
