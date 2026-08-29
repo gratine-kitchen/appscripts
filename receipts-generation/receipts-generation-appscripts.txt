@@ -192,7 +192,8 @@ function fillLineItems(sheet, items, startRow) {
     const row = startRow + i;
 
     const displayName = String(item.receiptDisplayName || '').trim();
-    const description = displayName !== '' ? displayName : item.dish;
+    var description = displayName !== '' ? displayName : item.dish;
+    description = (description.indexOf("course menu") > -1) ? description : "Upgrade: " + description;
     sheet.getRange(row, 1).setValue(description);
 
     sheet.getRange(row, 2).setValue(item.qty);
@@ -253,6 +254,8 @@ function updateTotals(sheet, firstRow, numRows, numRowsDelta, servicePct, discou
   if (depositPaid > 0) {
     const depositRow = totalRow - 1;
     sheet.insertRowBefore(totalRow);
+    totalRow = totalRow + 1;
+    sheet.getRange(depositRow, 3).setValue("Minus: Deposit")
     sheet.getRange(depositRow, 4).setValue(-depositPaid)
       .setNumberFormat('#,##0.00;(#,##0.00)')
       .setHorizontalAlignment('right');
